@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"encoding/json"
 )
 
 type CentralServer struct {
@@ -70,14 +71,121 @@ func (centralServer *CentralServer) setupAPI(w http.ResponseWriter, r *http.Requ
 		centralServer.setupCentralServer(cars, buildings, carcrashes, parkingspots)
 		w.Write([]byte("Everything ok.\n"))
 		go centralServer.startProtocol()
+	}	
+}
+
+func (centralServer *CentralServer) addCarAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "POST":
+		fmt.Println("")
+		if err := r.ParseForm(); err != nil {
+            fmt.Fprintf(w, "ParseForm() err: %v", err)
+            return
+		}
+		//[TODO: Check there is no car there]
+		car := r.FormValue("car")
+		fmt.Println("Car", car)
+		carSplited := strings.Split(car, ",")
+		x, _ := strconv.Atoi(carSplited[3])
+		y, _ := strconv.Atoi(carSplited[4])
+		destinationX, _ := strconv.Atoi(carSplited[5])
+		destinationY, _ := strconv.Atoi(carSplited[6])
+		newCar := Car{
+			Id: carSplited[0],
+			IP: carSplited[1],
+			Port: carSplited[2],
+			X: x,
+			Y: y,
+			DestinationX: destinationX,
+			DestinationY: destinationY,
+		}
+		centralServer.Cars[carSplited[1] + ":" + carSplited[2]] = newCar
+		centralServer.printMap()
+		w.Write([]byte("Everything ok.\n"))
 	}
-	
+}
+
+func (centralServer *CentralServer) addParkingSpotAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "POST":
+		fmt.Println("")
+		if err := r.ParseForm(); err != nil {
+            fmt.Fprintf(w, "ParseForm() err: %v", err)
+            return
+		}
+		//[TODO: Check there it can be there]
+		parkingSpot := r.FormValue("parkingSpot")
+		fmt.Println("ParkingSpot", parkingSpot)
+		parkingSpotSplitted := strings.Split(parkingSpot, ",")
+		x, _ := strconv.Atoi(parkingSpotSplitted[1])
+		y, _ := strconv.Atoi(parkingSpotSplitted[2])
+		newParkingSpot := ParkingSpot{
+			Id: parkingSpotSplitted[0],
+			X: x,
+			Y: y,
+		}
+		centralServer.ParkingSpots = append(centralServer.ParkingSpots, newParkingSpot)
+		centralServer.Map[x][y] = "p"
+		centralServer.printMap()
+		w.Write([]byte("Everything ok.\n"))
+	}
+}
+
+
+func (centralServer *CentralServer) addCarCrashAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "POST":
+		fmt.Println("")
+		if err := r.ParseForm(); err != nil {
+            fmt.Fprintf(w, "ParseForm() err: %v", err)
+            return
+		}
+		//[TODO: Check there it can be there]
+		carCrash := r.FormValue("carCrash")
+		fmt.Println("CarCrash", carCrash)
+		carCrashSplitted := strings.Split(carCrash, ",")
+		x, _ := strconv.Atoi(carCrashSplitted[1])
+		y, _ := strconv.Atoi(carCrashSplitted[2])
+		newCarCrash := CarCrash{
+			Id: carCrashSplitted[0],
+			X: x,
+			Y: y,
+		}
+		centralServer.CarCrashes = append(centralServer.CarCrashes, newCarCrash)
+		centralServer.Map[x][y] = "cc"
+		centralServer.printMap()
+		w.Write([]byte("Everything ok.\n"))
+	}
+}
+
+func (centralServer *CentralServer) updateAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		toSend := make(map[string][]int)
+		for k, v := range centralServer.Cars {
+			v.X = (v.X +1)%9
+			centralServer.Cars[k] = v
+			toSend[v.Id] = []int{v.X, v.Y, v.DestinationX, v.DestinationY}
+		}
+		js, err := json.Marshal(toSend)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+	}
 }
 
 func main() {
 	var centralServer CentralServer 
 	http.HandleFunc("/id", idAPI)
 	http.HandleFunc("/setup", centralServer.setupAPI)
+	http.HandleFunc("/addCarCrash", centralServer.addCarCrashAPI)
+	http.HandleFunc("/addParkingSpot", centralServer.addParkingSpotAPI)
+	http.HandleFunc("/addCar", centralServer.addCarAPI)
+	http.HandleFunc("/update", centralServer.updateAPI)
 	http.ListenAndServe(":" + strconv.Itoa(8086), nil)
 }
 
@@ -163,23 +271,27 @@ func (centralServer *CentralServer) mapAddBuildings(){
 	for _, building := range centralServer.Buildings {
 		centralServer.Map[building.X][building.Y] = "b"
 	}
-	fmt.Println("MAP", centralServer)
+	centralServer.printMap()
 }
 
 func (centralServer *CentralServer) mapAddCarCrashes(){
 	for _, carCrash := range centralServer.CarCrashes {
 		centralServer.Map[carCrash.X][carCrash.Y] = "cc"
 	}
-	fmt.Println("MAP", centralServer)
+	centralServer.printMap()
 }
 
 func (centralServer *CentralServer) mapAddParkingSpots(){
 	for _, parkingSpot := range centralServer.ParkingSpots {
 		centralServer.Map[parkingSpot.X][parkingSpot.Y] = "p"
 	}
-	fmt.Println("MAP", centralServer)
+	centralServer.printMap()
 }
 
 func (centralServer *CentralServer) startNodes(){
 	
+}
+
+func (centralServer *CentralServer) printMap(){
+	fmt.Println("MAP", centralServer.Map)
 }
