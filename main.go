@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"math/rand"
 	"encoding/json"
+	"net"
+	"github.com/dedis/protobuf"
 )
 
 type CentralServer struct {
@@ -14,6 +17,7 @@ type CentralServer struct {
 	ParkingSpots 	[]ParkingSpot
 	CarCrashes 		[]CarCrash
 	Map				[9][9]string
+	conn 			*net.UDPConn
 }
 
 type Car struct {
@@ -24,6 +28,7 @@ type Car struct {
 	Y 				int
 	DestinationX 	int
 	DestinationY  	int
+	Messages 		[]MessageTrace
 }
 
 type Building struct {
@@ -43,6 +48,24 @@ type ParkingSpot struct {
 	X int
 	Y int
 }
+
+type ServerNodeMessage struct {
+	Position *Position
+	Trace    *MessageTrace
+}
+type MessageTrace struct {
+	Type string
+	Text string
+}
+type Position struct { // TODO will probably be defined elsewhere
+	X uint32
+	Y uint32
+}
+
+type ServerMessage struct {
+	Type string
+}
+	
 
 func idAPI(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -158,14 +181,32 @@ func (centralServer *CentralServer) addCarCrashAPI(w http.ResponseWriter, r *htt
 	}
 }
 
+type UpdateUI struct {
+	Pos map[string][]int
+	Messages map[string][]MessageTrace
+}
+
 func (centralServer *CentralServer) updateAPI(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		toSend := make(map[string][]int)
+		toSendPos := make(map[string][]int)
+		toSendMessages := make(map[string][]MessageTrace)
 		for k, v := range centralServer.Cars {
 			v.X = (v.X +1)%9
+			types := []string{"parking", "crash", "police", "other"}
+			newMessage := MessageTrace{
+				Type: types[rand.Intn(len(types))],
+				Text: strconv.Itoa(len(v.Messages)),
+			}
+			v.Messages = append(v.Messages, newMessage)
+			toSendPos[v.Id] = []int{v.X, v.Y, v.DestinationX, v.DestinationY}
+			toSendMessages[v.Id] = v.Messages
+			v.Messages = []MessageTrace{}
 			centralServer.Cars[k] = v
-			toSend[v.Id] = []int{v.X, v.Y, v.DestinationX, v.DestinationY}
+		}
+		toSend := UpdateUI{
+			Pos: toSendPos,
+			Messages: toSendMessages,
 		}
 		js, err := json.Marshal(toSend)
 		if err != nil {
@@ -179,7 +220,12 @@ func (centralServer *CentralServer) updateAPI(w http.ResponseWriter, r *http.Req
 }
 
 func main() {
-	var centralServer CentralServer 
+	
+	udpAddr, _ := net.ResolveUDPAddr("udp4", "127.0.0.1:5999")
+	udpConn, _ := net.ListenUDP("udp4", udpAddr)
+	centralServer := CentralServer{
+		conn: udpConn,
+	}
 	http.HandleFunc("/id", idAPI)
 	http.HandleFunc("/setup", centralServer.setupAPI)
 	http.HandleFunc("/addCarCrash", centralServer.addCarCrashAPI)
@@ -259,7 +305,6 @@ func (centralServer *CentralServer) setupCentralServer(cars string, buildings st
 	fmt.Println(centralServer)
 }
 
-
 func (centralServer *CentralServer) startProtocol(){
 	centralServer.mapAddBuildings()
 	centralServer.startNodes()
@@ -294,4 +339,36 @@ func (centralServer *CentralServer) startNodes(){
 
 func (centralServer *CentralServer) printMap(){
 	fmt.Println("MAP", centralServer.Map)
+}
+
+
+func (centralServer *CentralServer) readNodes(){
+	for {
+		buffer := make([]byte, 9000)
+		n, addr, _ := centralServer.conn.ReadFromUDP(buffer)
+		// Dcoding the Packet
+		packet := &ServerNodeMessage{}
+		err := protobuf.Decode(buffer, packet)
+		if(err != nil){
+			//fmt.Printf("Error dcoding from peer, reason: %s\n", err)
+		}
+		protobuf.Decode(buffer[0:n], packet)
+		addrString := addr.String()
+		if(packet.Position != nil){
+			fmt.Println("IT IS A POSITION FROM", addrString, "NAME", centralServer.Cars[addrString].Id, ": X", packet.Position.X, "Y", packet.Position.Y)
+			c, ok := centralServer.Cars[addrString]
+			if ok {
+				c.X = int(packet.Position.X)
+				c.Y = int(packet.Position.Y)
+			}
+			centralServer.Cars[addrString] = c
+		}else if(packet.Trace != nil){
+			fmt.Println("IT IS A TRACE FROM", addrString, "NAME", centralServer.Cars[addrString].Id, "TYPE", packet.Trace.Type, "TEXT", packet.Trace.Text)
+			c, ok := centralServer.Cars[addrString]
+			if ok {
+				c.Messages = append(c.Messages, *packet.Trace)
+			}
+		}
+	}
+	
 }
