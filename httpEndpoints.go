@@ -185,3 +185,18 @@ func (centralServer *CentralServer) updateAPI(w http.ResponseWriter, r *http.Req
 		w.Write(js)
 	}
 }
+
+/***
+* POST /stop
+*
+* HTTP Endpoint for seting up the map and the car and starting the simulation
+***/
+func (centralServer *CentralServer) stopAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "POST":
+		// [TODO: STOP THE NETWORK]
+		// [TODO: CLEAN THE CENTRAL SERVER ATRIBUTES]
+		fmt.Println("STOPING!")
+		w.Write([]byte("Everything ok.\n"))
+	}	
+}

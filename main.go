@@ -94,6 +94,7 @@ func main() {
 	http.HandleFunc("/addParkingSpot", centralServer.addParkingSpotAPI)
 	http.HandleFunc("/addCar", centralServer.addCarAPI)
 	http.HandleFunc("/update", centralServer.updateAPI)
+	http.HandleFunc("/stop", centralServer.stopAPI)
 	// Web socket
 	http.ListenAndServe(":" + strconv.Itoa(8086), nil)
 }
