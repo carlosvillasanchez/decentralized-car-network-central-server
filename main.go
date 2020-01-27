@@ -10,6 +10,8 @@ import (
 	"net"
 	"github.com/dedis/protobuf"
 	"sync"
+	"os/exec"
+	"bytes"
 )
 
 const (
@@ -81,7 +83,14 @@ type ServerMessage struct {
 	
 // MAIN FUNCTION. Starting the server.
 func main() {
-	
+	cmd := exec.Command("whoami")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(out.String())
 	udpAddr, _ := net.ResolveUDPAddr("udp4", "127.0.0.1:5999")
 	udpConn, _ := net.ListenUDP("udp4", udpAddr)
 	centralServer := CentralServer{
@@ -124,6 +133,7 @@ func (centralServer *CentralServer) setupCentralServer(cars string, buildings st
 		}
 		centralServer.carsMutex.Lock()
 		centralServer.Cars = carsDict
+		fmt.Println(centralServer.Cars)
 		centralServer.carsMutex.Unlock()
 	}
 	if buildings != ""{
@@ -224,7 +234,85 @@ func (centralServer *CentralServer) mapAddParkingSpots(){
 * Launching nodes
 ***/
 func (centralServer *CentralServer) startNodes(){
-	
+	var mapFlag string
+	centralServer.mapMutex.RLock()
+	for _, row := range(centralServer.Map){
+		for _, obj := range(row){
+			if obj == ""{
+				mapFlag += "N,"
+			}else{
+				mapFlag += "B,"
+			}
+		}
+	}
+	centralServer.mapMutex.RUnlock()
+	var flags [][]string
+	var ids []string
+	areas := make(map[string][]string)
+	centralServer.carsMutex.RLock()
+	for i, car := range(centralServer.Cars){
+		var flags_aux []string
+
+		// gossipAddrs
+		flags_aux = append(flags_aux, car.IP + ":" + car.Port)
+		// map
+		flags_aux = append(flags_aux, mapFlag)
+		// name
+		flags_aux = append(flags_aux, car.Id)
+		// peers
+		if len(ids) == 0 {
+			flags_aux = append(flags_aux, "")
+		} else if len(ids) == 1 {
+			peers := centralServer.Cars[ids[0]].IP + ":" + centralServer.Cars[ids[0]].Port
+			flags_aux = append(flags_aux, peers)
+		}else{
+			peers := centralServer.Cars[ids[len(ids) - 1]].IP + ":" + centralServer.Cars[ids[len(ids) - 1]].Port
+			peers += centralServer.Cars[ids[len(ids) - 2]].IP + ":" + centralServer.Cars[ids[len(ids) - 2]].Port
+			flags_aux = append(flags_aux, peers)
+		}
+		// antiEntropy
+		flags_aux = append(flags_aux, "2")
+		// rTimer
+		flags_aux = append(flags_aux, "5")
+		// startPosition
+		flags_aux = append(flags_aux, strconv.Itoa(car.X) + "," + strconv.Itoa(car.Y))
+		// endPosition
+		flags_aux = append(flags_aux, strconv.Itoa(car.DestinationX) + "," + strconv.Itoa(car.DestinationY))
+		// area
+		var area int
+		if car.X > 4 {
+			area += 1
+		}
+		if car.Y > 4 {
+			area += 2
+		}
+		flags_aux = append(flags_aux, strconv.Itoa(area))
+
+		areas[strconv.Itoa(area)] = append(areas[strconv.Itoa(area)], car.IP + ":" + car.Port)
+		
+		ids = append(ids, i)
+
+		flags = append(flags, flags_aux)
+	}
+	centralServer.carsMutex.RUnlock()
+
+	for _, flag_array := range(flags){
+		go centralServer.startNode(flag_array, areas)
+	}
+}
+
+/***
+* Starting 1 node
+***/
+func (centralServer *CentralServer) startNode(flags []string, areas map[string][]string){
+	neighbours := ""
+	for _, addrs := range(areas[flags[8]]){
+		if addrs != flags[0] {
+			neighbours += addrs + ","
+		}
+	}
+	fmt.Println("NODE", flags[2], "POS", flags[6], "AREA", flags[8], "NEIGHBOURS", neighbours)
+
 }
 
 /*** 
@@ -253,14 +341,16 @@ func (centralServer *CentralServer) readNodes(){
 				c.Y = int(packet.Position.Y)
 				centralServer.Cars[addrString] = c
 				if c.Id == "police" {
-					if c.X != -1 || c.Y != -1 {
+					if c.X != 0 || c.Y != 0 {
 						if centralServer.Police {
 							fmt.Println("Police out of the station!")
 						}
 						centralServer.Police = false
 					}else{
-						centralServer.Police = true
-						fmt.Println("Police available again!")
+						if centralServer.Police {
+							fmt.Println("Police available again!")
+						}
+						centralServer.Police = true			
 					}
 				}
 				centralServer.carsMutex.Unlock()
